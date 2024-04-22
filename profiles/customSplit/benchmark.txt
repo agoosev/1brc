@@ -1,0 +1,12 @@
+goos: linux
+goarch: amd64
+pkg: github.com/agoosev/1brc
+cpu: AMD Ryzen 5 3600 6-Core Processor              
+Benchmark_process-4   	      69	 236467910 ns/op	17645163 B/op	 1002083 allocs/op
+Benchmark_process-4   	      49	 247850320 ns/op	17645214 B/op	 1002083 allocs/op
+Benchmark_process-4   	      45	 245711481 ns/op	17645160 B/op	 1002083 allocs/op
+Benchmark_process-4   	      45	 237063577 ns/op	17645149 B/op	 1002083 allocs/op
+Benchmark_process-4   	      55	 242710821 ns/op	17645151 B/op	 1002083 allocs/op
+Benchmark_process-4   	      52	 244357686 ns/op	17645145 B/op	 1002083 allocs/op
+PASS
+ok  	github.com/agoosev/1brc	77.618s

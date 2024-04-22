@@ -69,13 +69,13 @@ func getMeasurements(filePath string) (map[string]cityMeasurement, error) {
 	for scanner.Scan() {
 		txt := scanner.Text()
 
-		parts := strings.Split(txt, ";")
+		city, val := split(txt)
 
-		v, _ := strconv.ParseFloat(parts[1], 32)
+		v, _ := strconv.ParseFloat(val, 32)
 
-		m, ok := result[parts[0]]
+		m, ok := result[city]
 		if !ok {
-			result[parts[0]] = cityMeasurement{
+			result[city] = cityMeasurement{
 				min:   v,
 				max:   v,
 				total: v,
@@ -85,12 +85,12 @@ func getMeasurements(filePath string) (map[string]cityMeasurement, error) {
 			continue
 		}
 
-		m.min = min(result[parts[0]].min, v)
-		m.max = max(result[parts[0]].max, v)
+		m.min = min(result[city].min, v)
+		m.max = max(result[city].max, v)
 		m.total += v
 		m.count++
 
-		result[parts[0]] = m
+		result[city] = m
 	}
 
 	return result, nil
@@ -104,4 +104,14 @@ func round(x float64) float64 {
 	}
 
 	return truncated / 10.0
+}
+
+func split(s string) (string, string) {
+	for i := len(s) - 1; i >= 0; i-- {
+		if s[i] == ';' {
+			return s[:i], s[i+1:]
+		}
+	}
+
+	return "", ""
 }
