@@ -1,13 +1,14 @@
 package main
 
 import (
-	"bufio"
 	"fmt"
 	"log"
 	"math"
 	"os"
 	"sort"
 	"strings"
+
+	"golang.org/x/sys/unix"
 )
 
 type cityMeasurement struct {
@@ -62,15 +63,36 @@ func getMeasurements(filePath string) (map[string]cityMeasurement, error) {
 	}
 	defer f.Close()
 
+	stat, err := f.Stat()
+	if err != nil {
+		return nil, fmt.Errorf("file stat error: %w", err)
+	}
+
+	data, err := unix.Mmap(int(f.Fd()), 0, int(stat.Size()), unix.PROT_READ, unix.MAP_SHARED)
+	if err != nil {
+		return nil, fmt.Errorf("mmap file error: %w", err)
+	}
+	defer unix.Munmap(data)
+
 	result := make(map[string]cityMeasurement, 10000)
 
-	scanner := bufio.NewScanner(f)
-	for scanner.Scan() {
-		txt := scanner.Text()
+	start := 0
+	semicolumnPos := 0
+	for i, v := range data {
+		if v == ';' {
+			semicolumnPos = i
+			continue
+		}
 
-		city, val := split(txt)
+		if v != '\n' {
+			continue
+		}
 
-		v := parseFloat64(val)
+		city := string(data[start:semicolumnPos])
+
+		v := parseFloat64(data[semicolumnPos+1 : i])
+
+		start = i + 1
 
 		m, ok := result[city]
 		if !ok {
@@ -105,31 +127,21 @@ func round(x float64) float64 {
 	return truncated / 10.0
 }
 
-func split(s string) (string, string) {
-	for i := len(s) - 1; i >= 0; i-- {
-		if s[i] == ';' {
-			return s[:i], s[i+1:]
-		}
-	}
-
-	return "", ""
-}
-
-func parseFloat64(s string) float64 {
+func parseFloat64(b []byte) float64 {
 	var (
 		sign   float64 = 1
 		result float64
 	)
 
-	if s[0] == '-' {
+	if b[0] == '-' {
 		sign = -1
-		s = s[1:]
+		b = b[1:]
 	}
 
-	if len(s) == 3 {
-		result = float64(s[0]-'0') + float64(s[2]-'0')*0.1
+	if len(b) == 3 {
+		result = float64(b[0]-'0') + float64(b[2]-'0')*0.1
 	} else {
-		result = float64(s[0]-'0')*10 + float64(s[1]-'0') + float64(s[3]-'0')*0.1
+		result = float64(b[0]-'0')*10 + float64(b[1]-'0') + float64(b[3]-'0')*0.1
 	}
 
 	return sign * result
