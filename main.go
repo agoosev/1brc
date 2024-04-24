@@ -7,7 +7,6 @@ import (
 	"math"
 	"os"
 	"sort"
-	"strconv"
 	"strings"
 )
 
@@ -71,7 +70,7 @@ func getMeasurements(filePath string) (map[string]cityMeasurement, error) {
 
 		city, val := split(txt)
 
-		v, _ := strconv.ParseFloat(val, 32)
+		v := parseFloat64(val)
 
 		m, ok := result[city]
 		if !ok {
@@ -114,4 +113,24 @@ func split(s string) (string, string) {
 	}
 
 	return "", ""
+}
+
+func parseFloat64(s string) float64 {
+	var (
+		sign   float64 = 1
+		result float64
+	)
+
+	if s[0] == '-' {
+		sign = -1
+		s = s[1:]
+	}
+
+	if len(s) == 3 {
+		result = float64(s[0]-'0') + float64(s[2]-'0')*0.1
+	} else {
+		result = float64(s[0]-'0')*10 + float64(s[1]-'0') + float64(s[3]-'0')*0.1
+	}
+
+	return sign * result
 }
