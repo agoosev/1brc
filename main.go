@@ -7,6 +7,7 @@ import (
 	"os"
 	"sort"
 	"strings"
+	"unsafe"
 
 	"golang.org/x/sys/unix"
 )
@@ -32,7 +33,24 @@ func main() {
 }
 
 func process(filePath string) (string, error) {
-	measurements, err := getMeasurements(filePath)
+	f, err := os.Open(filePath)
+	if err != nil {
+		return "", fmt.Errorf("could not open measurements file: %w", err)
+	}
+	defer f.Close()
+
+	stat, err := f.Stat()
+	if err != nil {
+		return "", fmt.Errorf("file stat error: %w", err)
+	}
+
+	data, err := unix.Mmap(int(f.Fd()), 0, int(stat.Size()), unix.PROT_READ, unix.MAP_SHARED)
+	if err != nil {
+		return "", fmt.Errorf("mmap file error: %w", err)
+	}
+	defer unix.Munmap(data)
+
+	measurements, err := getMeasurements(data)
 	if err != nil {
 		return "", fmt.Errorf("unable to receive measurements: %w", err)
 	}
@@ -56,24 +74,7 @@ func process(filePath string) (string, error) {
 	return "{" + strings.Join(result, ", ") + "}\n", nil
 }
 
-func getMeasurements(filePath string) (map[string]cityMeasurement, error) {
-	f, err := os.Open(filePath)
-	if err != nil {
-		return nil, fmt.Errorf("could not open measurements file: %w", err)
-	}
-	defer f.Close()
-
-	stat, err := f.Stat()
-	if err != nil {
-		return nil, fmt.Errorf("file stat error: %w", err)
-	}
-
-	data, err := unix.Mmap(int(f.Fd()), 0, int(stat.Size()), unix.PROT_READ, unix.MAP_SHARED)
-	if err != nil {
-		return nil, fmt.Errorf("mmap file error: %w", err)
-	}
-	defer unix.Munmap(data)
-
+func getMeasurements(data []byte) (map[string]cityMeasurement, error) {
 	result := make(map[string]cityMeasurement, 10000)
 
 	start := 0
@@ -88,7 +89,7 @@ func getMeasurements(filePath string) (map[string]cityMeasurement, error) {
 			continue
 		}
 
-		city := string(data[start:semicolumnPos])
+		city := bytesToString(data[start:semicolumnPos])
 
 		v := parseFloat64(data[semicolumnPos+1 : i])
 
@@ -145,4 +146,8 @@ func parseFloat64(b []byte) float64 {
 	}
 
 	return sign * result
+}
+
+func bytesToString(b []byte) string {
+	return unsafe.String(unsafe.SliceData(b), len(b))
 }
