@@ -13,11 +13,17 @@ import (
 )
 
 type cityMeasurement struct {
+	name  string
 	min   float64
 	max   float64
 	total float64
 	count float64
 }
+
+const (
+	fnv1aOffset uint64 = 0xcbf29ce484222325
+	fnv1aPrime  uint64 = 0x100000001b3
+)
 
 func main() {
 	if len(os.Args) < 2 {
@@ -59,14 +65,14 @@ func process(filePath string) (string, error) {
 
 	cities := make([]string, 0, len(measurements))
 
-	for city := range measurements {
-		cities = append(cities, city)
+	for _, m := range measurements {
+		cities = append(cities, m.name)
 	}
 
 	sort.Strings(cities)
 
 	for _, city := range cities {
-		m := measurements[city]
+		m := measurements[stringHash(city)]
 
 		result = append(result, fmt.Sprintf("%s=%.1f/%.1f/%.1f", city, m.min, round(m.total/m.count), m.max))
 	}
@@ -74,15 +80,23 @@ func process(filePath string) (string, error) {
 	return "{" + strings.Join(result, ", ") + "}\n", nil
 }
 
-func getMeasurements(data []byte) (map[string]cityMeasurement, error) {
-	result := make(map[string]cityMeasurement, 10000)
+func getMeasurements(data []byte) (map[uint64]cityMeasurement, error) {
+	result := make(map[uint64]cityMeasurement, 10000)
 
 	start := 0
 	semicolumnPos := 0
+	calculateHash := true
+	hash := fnv1aOffset
 	for i, v := range data {
 		if v == ';' {
 			semicolumnPos = i
+			calculateHash = false
 			continue
+		}
+
+		if calculateHash {
+			hash ^= uint64(data[i])
+			hash *= fnv1aPrime
 		}
 
 		if v != '\n' {
@@ -91,28 +105,34 @@ func getMeasurements(data []byte) (map[string]cityMeasurement, error) {
 
 		city := bytesToString(data[start:semicolumnPos])
 
-		v := parseFloat64(data[semicolumnPos+1 : i])
+		value := parseFloat64(data[semicolumnPos+1 : i])
 
 		start = i + 1
 
-		m, ok := result[city]
+		m, ok := result[hash]
 		if !ok {
-			result[city] = cityMeasurement{
-				min:   v,
-				max:   v,
-				total: v,
+			result[hash] = cityMeasurement{
+				name:  city,
+				min:   value,
+				max:   value,
+				total: value,
 				count: 1,
 			}
+			calculateHash = true
+			hash = fnv1aOffset
 
 			continue
 		}
 
-		m.min = min(result[city].min, v)
-		m.max = max(result[city].max, v)
-		m.total += v
+		m.min = min(m.min, value)
+		m.max = max(m.max, value)
+		m.total += value
 		m.count++
 
-		result[city] = m
+		result[hash] = m
+
+		calculateHash = true
+		hash = fnv1aOffset
 	}
 
 	return result, nil
@@ -150,4 +170,14 @@ func parseFloat64(b []byte) float64 {
 
 func bytesToString(b []byte) string {
 	return unsafe.String(unsafe.SliceData(b), len(b))
+}
+
+func stringHash(s string) uint64 {
+	hash := fnv1aOffset
+	for _, b := range []byte(s) {
+		hash ^= uint64(b)
+		hash *= fnv1aPrime
+	}
+
+	return hash
 }
