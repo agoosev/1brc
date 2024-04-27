@@ -1,12 +1,15 @@
 package main
 
 import (
+	"bytes"
 	"fmt"
 	"log"
 	"math"
 	"os"
+	"runtime"
 	"sort"
 	"strings"
+	"sync"
 	"unsafe"
 
 	"golang.org/x/sys/unix"
@@ -81,6 +84,53 @@ func process(filePath string) (string, error) {
 }
 
 func getMeasurements(data []byte) (map[uint64]cityMeasurement, error) {
+	var wg sync.WaitGroup
+
+	workersCount := runtime.GOMAXPROCS(0)
+	chunkSize := len(data) / workersCount
+	if chunkSize == 0 {
+		chunkSize = len(data)
+	}
+	borders := getBorders(data, chunkSize, workersCount)
+
+	start := 0
+	results := make([]map[uint64]cityMeasurement, len(borders))
+	for i, border := range borders {
+		wg.Add(1)
+
+		go func(workerNumber, start, end int) {
+			results[workerNumber] = processChunk(data[start:end])
+			wg.Done()
+		}(i, start, border)
+
+		start = border
+	}
+
+	wg.Wait()
+	results = filterResults(results)
+
+	if len(results) > 1 {
+		for _, storage := range results[1:] {
+			for hash, m := range storage {
+				v, ok := results[0][hash]
+				if !ok {
+					results[0][hash] = m
+				} else {
+					v.min = min(v.min, m.min)
+					v.max = max(v.max, m.max)
+					v.total += m.total
+					v.count += m.count
+					results[0][hash] = v
+				}
+			}
+		}
+
+	}
+
+	return results[0], nil
+}
+
+func processChunk(data []byte) map[uint64]cityMeasurement {
 	result := make(map[uint64]cityMeasurement, 10000)
 
 	start := 0
@@ -135,7 +185,7 @@ func getMeasurements(data []byte) (map[uint64]cityMeasurement, error) {
 		hash = fnv1aOffset
 	}
 
-	return result, nil
+	return result
 }
 
 func round(x float64) float64 {
@@ -180,4 +230,38 @@ func stringHash(s string) uint64 {
 	}
 
 	return hash
+}
+
+func getBorders(b []byte, chunkSize int, maxChunksCount int) []int {
+	border := 0
+	borders := make([]int, 0, maxChunksCount)
+	for border < len(b) {
+		border += chunkSize
+		if border > len(b)-1 {
+			borders = append(borders, len(b))
+			break
+		}
+
+		eolPosition := bytes.IndexByte(b[border:], '\n')
+		if eolPosition == -1 {
+			borders = append(borders, len(borders))
+			break
+		}
+
+		border = border + eolPosition + 1
+		borders = append(borders, border)
+	}
+
+	return borders
+}
+
+func filterResults(s []map[uint64]cityMeasurement) []map[uint64]cityMeasurement {
+	result := make([]map[uint64]cityMeasurement, 0, len(s))
+	for _, v := range s {
+		if v != nil {
+			result = append(result, v)
+		}
+	}
+
+	return result
 }
