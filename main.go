@@ -17,6 +17,7 @@ import (
 
 type cityMeasurement struct {
 	name  string
+	hash  uint64
 	min   float64
 	max   float64
 	total float64
@@ -26,6 +27,8 @@ type cityMeasurement struct {
 const (
 	fnv1aOffset uint64 = 0xcbf29ce484222325
 	fnv1aPrime  uint64 = 0x100000001b3
+
+	storageCapacity = 16384
 )
 
 func main() {
@@ -69,13 +72,19 @@ func process(filePath string) (string, error) {
 	cities := make([]string, 0, len(measurements))
 
 	for _, m := range measurements {
-		cities = append(cities, m.name)
+		if m != nil {
+			cities = append(cities, m.name)
+		}
 	}
 
 	sort.Strings(cities)
 
 	for _, city := range cities {
-		m := measurements[stringHash(city)]
+		index, ok := getIndex(stringHash(city), measurements)
+		if !ok {
+			return "", fmt.Errorf("city not found")
+		}
+		m := measurements[index]
 
 		result = append(result, fmt.Sprintf("%s=%.1f/%.1f/%.1f", city, m.min, round(m.total/m.count), m.max))
 	}
@@ -83,7 +92,7 @@ func process(filePath string) (string, error) {
 	return "{" + strings.Join(result, ", ") + "}\n", nil
 }
 
-func getMeasurements(data []byte) (map[uint64]cityMeasurement, error) {
+func getMeasurements(data []byte) ([]*cityMeasurement, error) {
 	var wg sync.WaitGroup
 
 	workersCount := runtime.GOMAXPROCS(0)
@@ -94,7 +103,7 @@ func getMeasurements(data []byte) (map[uint64]cityMeasurement, error) {
 	borders := getBorders(data, chunkSize, workersCount)
 
 	start := 0
-	results := make([]map[uint64]cityMeasurement, len(borders))
+	results := make([][]*cityMeasurement, len(borders))
 	for i, border := range borders {
 		wg.Add(1)
 
@@ -111,16 +120,21 @@ func getMeasurements(data []byte) (map[uint64]cityMeasurement, error) {
 
 	if len(results) > 1 {
 		for _, storage := range results[1:] {
-			for hash, m := range storage {
-				v, ok := results[0][hash]
+			for _, m := range storage {
+				if m == nil {
+					continue
+				}
+
+				index, ok := getIndex(m.hash, results[0])
 				if !ok {
-					results[0][hash] = m
+					results[0][index] = m
 				} else {
+					v := results[0][index]
 					v.min = min(v.min, m.min)
 					v.max = max(v.max, m.max)
 					v.total += m.total
 					v.count += m.count
-					results[0][hash] = v
+					results[0][index] = v
 				}
 			}
 		}
@@ -130,8 +144,8 @@ func getMeasurements(data []byte) (map[uint64]cityMeasurement, error) {
 	return results[0], nil
 }
 
-func processChunk(data []byte) map[uint64]cityMeasurement {
-	result := make(map[uint64]cityMeasurement, 10000)
+func processChunk(data []byte) []*cityMeasurement {
+	result := make([]*cityMeasurement, storageCapacity)
 
 	start := 0
 	semicolumnPos := 0
@@ -159,10 +173,11 @@ func processChunk(data []byte) map[uint64]cityMeasurement {
 
 		start = i + 1
 
-		m, ok := result[hash]
+		index, ok := getIndex(hash, result)
 		if !ok {
-			result[hash] = cityMeasurement{
+			result[index] = &cityMeasurement{
 				name:  city,
+				hash:  hash,
 				min:   value,
 				max:   value,
 				total: value,
@@ -174,18 +189,29 @@ func processChunk(data []byte) map[uint64]cityMeasurement {
 			continue
 		}
 
+		m := result[index]
 		m.min = min(m.min, value)
 		m.max = max(m.max, value)
 		m.total += value
 		m.count++
 
-		result[hash] = m
+		result[index] = m
 
 		calculateHash = true
 		hash = fnv1aOffset
 	}
 
 	return result
+}
+
+func getIndex(hash uint64, s []*cityMeasurement) (uint64, bool) {
+	index := hash & (storageCapacity - 1)
+
+	for s[index] != nil && s[index].hash != hash {
+		index = (index + 1) & (storageCapacity - 1)
+	}
+
+	return index, s[index] != nil
 }
 
 func round(x float64) float64 {
@@ -255,10 +281,10 @@ func getBorders(b []byte, chunkSize int, maxChunksCount int) []int {
 	return borders
 }
 
-func filterResults(s []map[uint64]cityMeasurement) []map[uint64]cityMeasurement {
-	result := make([]map[uint64]cityMeasurement, 0, len(s))
+func filterResults(s [][]*cityMeasurement) [][]*cityMeasurement {
+	result := make([][]*cityMeasurement, 0, len(s))
 	for _, v := range s {
-		if v != nil {
+		if len(v) != 0 {
 			result = append(result, v)
 		}
 	}
