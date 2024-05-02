@@ -18,10 +18,10 @@ import (
 type cityMeasurement struct {
 	name  string
 	hash  uint64
-	min   float64
-	max   float64
-	total float64
-	count float64
+	min   int32
+	max   int32
+	total int32
+	count int32
 }
 
 const (
@@ -86,7 +86,11 @@ func process(filePath string) (string, error) {
 		}
 		m := measurements[index]
 
-		result = append(result, fmt.Sprintf("%s=%.1f/%.1f/%.1f", city, m.min, round(m.total/m.count), m.max))
+		min := prepareInt(m.min)
+		avg := prepareInt(round(float64(m.total) / float64(m.count)))
+		max := prepareInt(m.max)
+
+		result = append(result, fmt.Sprintf("%s=%s/%s/%s", city, min, avg, max))
 	}
 
 	return "{" + strings.Join(result, ", ") + "}\n", nil
@@ -169,7 +173,7 @@ func processChunk(data []byte) []*cityMeasurement {
 
 		city := bytesToString(data[start:semicolumnPos])
 
-		value := parseFloat64(data[semicolumnPos+1 : i])
+		value := parseInt32(data[semicolumnPos+1 : i])
 
 		start = i + 1
 
@@ -214,20 +218,34 @@ func getIndex(hash uint64, s []*cityMeasurement) (uint64, bool) {
 	return index, s[index] != nil
 }
 
-func round(x float64) float64 {
-	x = x * 10
-	truncated := math.Trunc(x)
-	if math.Abs(x-truncated) >= 0.1 {
-		truncated += math.Copysign(1, x)
-	}
+func round(x float64) int32 {
+	rounded := math.Round(x)
 
-	return truncated / 10.0
+	return int32(rounded)
 }
 
-func parseFloat64(b []byte) float64 {
+func prepareInt(i int32) []byte {
+	b := make([]byte, 0, 5)
+
+	if i < 0 {
+		b = append(b, '-')
+		i *= -1
+	}
+
+	v := i / 10
+	if v < 10 {
+		b = append(b, '0'+byte(v))
+	} else {
+		b = append(b, '0'+byte(v/10), '0'+byte(v%10))
+	}
+
+	return append(b, '.', '0'+byte(i%10))
+}
+
+func parseInt32(b []byte) int32 {
 	var (
-		sign   float64 = 1
-		result float64
+		sign   int32 = 1
+		result int32
 	)
 
 	if b[0] == '-' {
@@ -236,9 +254,9 @@ func parseFloat64(b []byte) float64 {
 	}
 
 	if len(b) == 3 {
-		result = float64(b[0]-'0') + float64(b[2]-'0')*0.1
+		result = int32(b[0]-'0')*10 + int32(b[2]-'0')
 	} else {
-		result = float64(b[0]-'0')*10 + float64(b[1]-'0') + float64(b[3]-'0')*0.1
+		result = int32(b[0]-'0')*100 + int32(b[1]-'0')*10 + int32(b[3]-'0')
 	}
 
 	return sign * result

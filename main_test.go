@@ -63,22 +63,22 @@ func Test_round(t *testing.T) {
 	cases := []struct {
 		name     string
 		v        float64
-		expected float64
+		expected int32
 	}{
 		{
-			name:     "25.449",
-			v:        25.449,
-			expected: 25.5,
+			name:     "254.49",
+			v:        254.49,
+			expected: 254,
 		},
 		{
-			name:     "-99.9000015258789",
-			v:        -99.9000015258789,
-			expected: -99.9,
+			name:     "-999.000015258789",
+			v:        -999.000015258789,
+			expected: -999,
 		},
 		{
-			name:     "99.9000015258789",
-			v:        99.9000015258789,
-			expected: 99.9,
+			name:     "999.000015258789",
+			v:        999.000015258789,
+			expected: 999,
 		},
 	}
 
