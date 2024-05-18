@@ -3,6 +3,7 @@ package main
 import (
 	"bytes"
 	"fmt"
+	"hash/maphash"
 	"log"
 	"math"
 	"os"
@@ -24,12 +25,9 @@ type cityMeasurement struct {
 	count int32
 }
 
-const (
-	fnv1aOffset uint64 = 0xcbf29ce484222325
-	fnv1aPrime  uint64 = 0x100000001b3
+const storageCapacity = 16384
 
-	storageCapacity = 16384
-)
+var seed = maphash.MakeSeed()
 
 func main() {
 	if len(os.Args) < 2 {
@@ -80,7 +78,7 @@ func process(filePath string) (string, error) {
 	sort.Strings(cities)
 
 	for _, city := range cities {
-		index, ok := getIndex(stringHash(city), measurements)
+		index, ok := getIndex(maphash.String(seed, city), measurements)
 		if !ok {
 			return "", fmt.Errorf("city not found")
 		}
@@ -152,30 +150,30 @@ func processChunk(data []byte) []*cityMeasurement {
 	result := make([]*cityMeasurement, storageCapacity)
 
 	start := 0
-	semicolumnPos := 0
-	calculateHash := true
-	hash := fnv1aOffset
-	for i, v := range data {
-		if v == ';' {
-			semicolumnPos = i
-			calculateHash = false
+	i := 0
+	for i < len(data) {
+		word := *(*uint64)(unsafe.Pointer(&data[i]))
+
+		semicolumnPos, ok := findPosition(word, ';', i)
+		if !ok {
+			i = i + 8
 			continue
 		}
 
-		if calculateHash {
-			hash ^= uint64(data[i])
-			hash *= fnv1aPrime
+		word = *(*uint64)(unsafe.Pointer(&data[semicolumnPos+1]))
+		nlPos, ok := findPosition(word, '\n', semicolumnPos+1) // we 100% have new line in the next 8 bytes, or it's the last record in the file
+		if !ok {
+			nlPos = len(data) - 1
 		}
 
-		if v != '\n' {
-			continue
-		}
+		hash := maphash.Bytes(seed, data[start:semicolumnPos])
 
 		city := bytesToString(data[start:semicolumnPos])
 
-		value := parseInt32(data[semicolumnPos+1 : i])
+		value := parseInt32(data[semicolumnPos+1 : nlPos])
 
-		start = i + 1
+		i = nlPos + 1
+		start = i
 
 		index, ok := getIndex(hash, result)
 		if !ok {
@@ -187,8 +185,6 @@ func processChunk(data []byte) []*cityMeasurement {
 				total: value,
 				count: 1,
 			}
-			calculateHash = true
-			hash = fnv1aOffset
 
 			continue
 		}
@@ -200,12 +196,22 @@ func processChunk(data []byte) []*cityMeasurement {
 		m.count++
 
 		result[index] = m
-
-		calculateHash = true
-		hash = fnv1aOffset
 	}
 
 	return result
+}
+
+func findPosition(word uint64, symbol byte, offset int) (int, bool) {
+	var mask uint64 = 0x101010101010101 * uint64(symbol)
+	xorResult := word ^ mask
+	found := ((xorResult - 0x0101010101010101) &^ xorResult & 0x8080808080808080)
+	if found == 0 {
+		return 0, false
+	}
+
+	result := ((((found - 1) & 0x101010101010101) * 0x101010101010101) >> 56) - 1
+
+	return int(result) + offset, true
 }
 
 func getIndex(hash uint64, s []*cityMeasurement) (uint64, bool) {
@@ -264,16 +270,6 @@ func parseInt32(b []byte) int32 {
 
 func bytesToString(b []byte) string {
 	return unsafe.String(unsafe.SliceData(b), len(b))
-}
-
-func stringHash(s string) uint64 {
-	hash := fnv1aOffset
-	for _, b := range []byte(s) {
-		hash ^= uint64(b)
-		hash *= fnv1aPrime
-	}
-
-	return hash
 }
 
 func getBorders(b []byte, chunkSize int, maxChunksCount int) []int {
